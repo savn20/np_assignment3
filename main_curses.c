@@ -1,6 +1,7 @@
 #include <curses.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <string.h>
 #include <regex.h>
 
@@ -11,11 +12,17 @@
 int main(int argc, char *argv[]){
 
   int maxlines,maxcols;
-  /*
-  initscr();
+
+  WINDOW *mainwin;
+  
+  if ( ( mainwin = initscr()) == NULL ) {
+    fprintf(stderr,"Error init ncurses.\n");
+    exit(EXIT_FAILURE);
+  }
+  
   cbreak();
   noecho();
-  */
+
   
   maxlines = LINES - 1;
   maxcols = COLS - 1;
@@ -36,6 +43,7 @@ int main(int argc, char *argv[]){
   portstring=strtok_r(rest,":",&rest);
   //  printf("Got %s split into %s and %s \n",org, hoststring,portstring);
   mvprintw(wLine,wCol,"Got %s split into %s and %s \n",org, hoststring,portstring);
+  refresh();
   wLine++;
 
 
@@ -56,30 +64,32 @@ int main(int argc, char *argv[]){
   printf("Testing nicknames. \n");
   
   for(int i=2;i<argc;i++){
-    printf("Testing : |%s|\n", argv[i]);
+    printf("Testing : |%s| (wLine,wCol) = (%d,%d)\n", argv[i],wLine,wCol);
     if(strlen(argv[i])<12){
       reti=regexec(&regularexpression, argv[i],matches,&items,0);
       if(!reti){
-	printf("Nick %s is accepted.\n",argv[i]);
-	//	mvprintw(wLine,wCol,"Nick is accepted.",argv[i]);
+	//printf("Nick %s is accepted.\n",argv[i]);
+	mvprintw(wLine,wCol,"Nick is accepted.",argv[i]);
       } else {
-	printf("%s is not accepted.\n",argv[i]);
-	//	mvprintw(wLine,wCol,"Nick is not accepted.",argv[i]);
+	//printf("%s is not accepted.\n",argv[i]);
+	mvprintw(wLine,wCol,"Nick is not accepted.",argv[i]);
       }
     } else {
-      printf("%s is too long (%d vs 12 chars).\n", argv[i], strlen(argv[i]));
-      //      mvprintw(wLine,wCol,"%s is too long (%d vs 12 chars).\n", argv[i], strlen(argv[i]));
+      //printf("%s is too long (%d vs 12 chars).\n", argv[i], strlen(argv[i]));
+      mvprintw(wLine,wCol,"%s is too long (%d vs 12 chars).\n", argv[i], strlen(argv[i]));
     }
     wLine++;
+    refresh();
   }
   printf("Leaving\n");
   regfree(&regularexpression);
   free(org);
 
+  sleep(5);
 
-
-
-
-  return(0);
+  delwin(mainwin);
+  endwin();
+  
+  return(EXIT_SUCCESS);
   
 }
