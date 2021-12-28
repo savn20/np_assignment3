@@ -269,6 +269,10 @@ int main(int argc, char *argv[])
                         }
 
                         int sendSocket = 0;
+                        response = buffer;
+                        strcpy(buffer, response.substr(3).c_str());
+                        sprintf(reply, "%s:%s\r", users[i].nickname, buffer);
+
                         for (int j = 0; j < USER_LIMIT; j++)
                         {
                             if (users[j].socket == 0)
@@ -278,10 +282,7 @@ int main(int argc, char *argv[])
                             if (clientSocket == sendSocket)
                                 continue;
 
-                            response = buffer;
-                            strcpy(buffer, response.substr(3).c_str());
-                            sprintf(reply, "%s:%s\r", users[i].nickname, buffer);
-                            cout << "broadcasting reply " << reply << endl;
+                            cout << "broadcasting: " << reply;
 
                             send(sendSocket, reply, strlen(reply), 0);
                         }

@@ -82,8 +82,8 @@ int main(int argc, char *argv[])
     if (connect(serverSocket, (struct sockaddr *)&address, sizeof(address)) < 0)
     {
         close(serverSocket);
-        cerr << "error: failed to bind socket\n"
-             << "program terminated while bind()" << endl;
+        cerr << "error: failed to connect to socket\n"
+             << "program terminated while connect()" << endl;
 
         exit(-1);
     }
@@ -105,7 +105,7 @@ int main(int argc, char *argv[])
         exit(-1);
     }
 
-    cout << "protocol supported sending nickname: " << nickname << endl;
+    cout << "protocol supported sending nickname:" << nickname << endl;
 
     /**************************************/
     /*  NICK <nick> protocol -> OK/ERR   */
@@ -117,30 +117,51 @@ int main(int argc, char *argv[])
 
     if (strcmp(strtok(response, "\n"), OK) != 0)
     {
-        perror("error: nickname can't be accepted\n");
+        perror("error: something wrong with your nickname\n");
         close(serverSocket);
         exit(-1);
     }
 
+    fd_set socketSet;
+
     while (1)
     {
-        gets(text);
-        sprintf(message, "MSG %s", text);
-        sendMessage(serverSocket, message, strlen(message));
+        FD_ZERO(&socketSet);
+        FD_SET(0, &socketSet);
+        FD_SET(serverSocket, &socketSet);
 
-        bytes = getResponse(serverSocket, response, sizeof(response));
+        if (select(serverSocket + 1, &socketSet, NULL, NULL, NULL) == -1)
+        {
+            perror("select:");
+            exit(1);
+        }
 
-        response[bytes] = '\0';
+        // socket response
+        if (FD_ISSET(serverSocket, &socketSet))
+        {
+            bytes = getResponse(serverSocket, response, sizeof(response));
+            response[bytes] = '\0';
+            printf("%s\n", strtok(response, "\n"));
+            memset(response, 0, BUFFER_SIZE);
+        }
 
-        printf("%s\n", strtok(response, "\n"));
-
-        memset(response, 0, BUFFER_SIZE);
+        /**************************************/
+        /*  MSG <text> protocol ->           */
+        /*    MSG nick <text>/ERROR <text>  */
+        /***********************************/
+        if (FD_ISSET(0, &socketSet))
+        {
+            fgets(message, 255, stdin);
+            string inp = strdup(message);
+            inp.insert(0, "MSG ");
+            strcpy(message, inp.c_str());
+            sendMessage(serverSocket, message, strlen(message));
+        }
     }
 }
 
 void sendMessage(int socketConnection, char *message, int n)
 {
-    cout << "" << endl;
     if (send(socketConnection, message, n, 0) < 0)
     {
         cerr << "error: failed to send message\n"
