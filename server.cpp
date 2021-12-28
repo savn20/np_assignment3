@@ -278,7 +278,10 @@ int main(int argc, char *argv[])
                             if (clientSocket == sendSocket)
                                 continue;
 
-                            sprintf(reply, "%s: %s", users[i].nickname, buffer);
+                            response = buffer;
+                            strcpy(buffer, response.substr(3).c_str());
+                            sprintf(reply, "%s:%s\r", users[i].nickname, buffer);
+                            cout << "broadcasting reply " << reply << endl;
 
                             send(sendSocket, reply, strlen(reply), 0);
                         }
