@@ -1,15 +1,17 @@
-#include <iostream>
-#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <iostream>
 
 #include <unistd.h>
 #include <arpa/inet.h>
-#include <netinet/in.h>
+#include <netdb.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/time.h>
 #include <regex.h>
+
+#include "calcLib.h"
 
 // comment the DEBUG macro to turn off comments in the console
 #define DEBUG
@@ -22,8 +24,7 @@ using namespace std;
 void sendMessage(int socketConnection, char *message, int n);
 int getResponse(int socketConnection, char *message, int n);
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
     // disables debugging when there's no DEBUG macro defined
 #ifndef DEBUG
     cout.setstate(ios_base::failbit);
@@ -41,59 +42,57 @@ int main(int argc, char *argv[])
         exit(-1);
     }
 
-    char seperator[] = ":";
-    char *serverIp = strtok(argv[1], seperator);
-    char *destPort = strtok(NULL, seperator);
-    int serverPort = atoi(destPort);
-
+    char delim[] = ":";
+    char *serverIp = strtok(argv[1], delim);
+    char *serverPort = strtok(NULL, delim);
     char *nickname = argv[2];
 
-    int serverSocket = -1,
-        bytes = -1;
+    int sockFd, rv, byteSize;
 
     /*************************************/
     /*   setting up server metadata     */
     /***********************************/
-    sockaddr_in address;
-    address.sin_family = AF_INET;
-    address.sin_port = htons(serverPort);
-    address.sin_addr.s_addr = inet_addr(serverIp);
+	addrinfo hints, *servinfo, *ptr;
+    memset(&hints, 0, sizeof hints);
+
+    hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
 
     char response[BUFFER_SIZE];
     char message[BUFFER_SIZE];
+	char s[INET6_ADDRSTRLEN];
     char text[256];
 
-    cout << "establishing connection..." << endl;
+    verify((rv = getaddrinfo(serverIp, serverPort, &hints, &servinfo)) != 0);
 
-    /*************************************/
-    /*   creating socket connection     */
-    /***********************************/
-    if ((serverSocket = socket(AF_INET, SOCK_STREAM, 0)) == -1)
-    {
-        cerr << "client: failed to create socket\n"
-             << "program terminated while socket()" << endl;
+	for(ptr = servinfo; ptr != NULL; ptr = ptr->ai_next) {
+        // creating socket
+		if((sockFd = socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol)) == -1) {
+			cerr << "talker: socket\n";
+			continue;
+		}
 
+		break;
+	}
+
+    if (ptr == NULL) {
+		cerr << "talker: failed to create socket\n";
         exit(-1);
-    }
+	}
 
-    /******************************************/
-    /*  establishing connection with server  */
-    /****************************************/
-    if (connect(serverSocket, (struct sockaddr *)&address, sizeof(address)) < 0)
-    {
-        close(serverSocket);
-        cerr << "error: failed to connect to socket\n"
-             << "program terminated while connect()" << endl;
+    // connecting to established socket
+    verify(connect(sockFd,ptr->ai_addr, ptr->ai_addrlen));
 
-        exit(-1);
-    }
-
-    printf("connected to server %s:%d\n", serverIp, serverPort);
-
+    inet_ntop(ptr->ai_family, getSocketAddress((struct sockaddr *)ptr->ai_addr),
+            s, sizeof s);
+        
+    printf("Host %s and port %s\n", s, serverPort);
+	freeaddrinfo(servinfo);
+    
     /*************************************/
     /*  connect() -> HELLO 1 (response) */
     /***********************************/
-    getResponse(serverSocket, response, sizeof(response));
+    getResponse(sockFd, response, sizeof(response));
 
     printf("server protocol: %s\n", strtok(response, "\n"));
 
@@ -101,7 +100,7 @@ int main(int argc, char *argv[])
     {
         cerr << "error: client didn't server protocol "
              << strtok(response, "\n") << endl;
-        close(serverSocket);
+        close(sockFd);
         exit(-1);
     }
 
@@ -111,16 +110,9 @@ int main(int argc, char *argv[])
     /*  NICK <nick> protocol -> OK/ERR   */
     /************************************/
     sprintf(message, "NICK %s", nickname);
-    sendMessage(serverSocket, message, strlen(message));
+    sendMessage(sockFd, message, strlen(message));
 
-    getResponse(serverSocket, response, sizeof(response));
-
-    if (strcmp(strtok(response, "\n"), OK) != 0)
-    {
-        perror("error: something wrong with your nickname\n");
-        close(serverSocket);
-        exit(-1);
-    }
+    getResponse(sockFd, response, sizeof(response));
 
     fd_set socketSet;
 
@@ -128,19 +120,14 @@ int main(int argc, char *argv[])
     {
         FD_ZERO(&socketSet);
         FD_SET(0, &socketSet);
-        FD_SET(serverSocket, &socketSet);
+        FD_SET(sockFd, &socketSet);
 
-        if (select(serverSocket + 1, &socketSet, NULL, NULL, NULL) == -1)
-        {
-            perror("select:");
-            exit(1);
-        }
+        verify(select(sockFd + 1, &socketSet, NULL, NULL, NULL));
 
         // socket response
-        if (FD_ISSET(serverSocket, &socketSet))
-        {
-            bytes = getResponse(serverSocket, response, sizeof(response));
-            response[bytes] = '\0';
+        if (FD_ISSET(sockFd, &socketSet)) {
+            byteSize = getResponse(sockFd, response, sizeof(response));
+            response[byteSize] = '\0';
             printf("%s\n", strtok(response, "\n"));
             memset(response, 0, BUFFER_SIZE);
         }
@@ -149,13 +136,12 @@ int main(int argc, char *argv[])
         /*  MSG <text> protocol ->           */
         /*    MSG nick <text>/ERROR <text>  */
         /***********************************/
-        if (FD_ISSET(0, &socketSet))
-        {
+        if (FD_ISSET(0, &socketSet)) {
             fgets(message, 255, stdin);
             string inp = strdup(message);
             inp.insert(0, "MSG ");
             strcpy(message, inp.c_str());
-            sendMessage(serverSocket, message, strlen(message));
+            sendMessage(sockFd, message, strlen(message));
         }
     }
 }
@@ -177,7 +163,7 @@ int getResponse(int socketConnection, char *response, int n)
 
     if (r <= 0)
     {
-        cerr << "error: no bytes rec from server\n"
+        cerr << "error: no byteSize rec from server\n"
              << "program terminated while recv()" << endl;
         close(socketConnection);
         exit(-1);

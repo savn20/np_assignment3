@@ -1,25 +1,34 @@
-CC = gcc
-CC_FLAGS = -w -g
+CC_FLAGS= -Wall -I.
+LD_FLAGS= -Wall -L./ 
 
 
+all: libcalc test client server
 
-all: test client server
+servermain.o: servermain.cpp
+	$(CXX)  $(CC_FLAGS) $(CFLAGS) -c servermain.cpp 
+
+clientmain.o: clientmain.cpp
+	$(CXX) $(CC_FLAGS) $(CFLAGS) -c clientmain.cpp 
+
+main.o: main.cpp
+	$(CXX) $(CC_FLAGS) $(CFLAGS) -c main.cpp 
 
 
-main_curses.o: main_curses.c
-	$(CC) -Wall -I. -c main_curses.c
+test: main.o calcLib.o
+	$(CXX) $(LD_FLAGS) -o test main.o -lcalc
+
+client: clientmain.o calcLib.o
+	$(CXX) $(LD_FLAGS) -o cchat clientmain.o -lcalc
+
+server: servermain.o calcLib.o
+	$(CXX) $(LD_FLAGS) -o cserverd servermain.o -lcalc
 
 
-test: main_curses.o
-	$(CC) -I./ -Wall main_curses.o -lncurses  -o test 
+calcLib.o: calcLib.c calcLib.h
+	gcc -Wall -fPIC -c calcLib.c
 
-
-client: client.o
-	$(CC) -Wall -o cchat client.o
-
-server: server.o
-	$(CC) -Wall -o cserverd server.o
-
+libcalc: calcLib.o
+	ar -rc libcalc.a -o calcLib.o
 
 clean:
-	rm *.o *.a test cserverd cchat
+	rm *.o *.a test server client
