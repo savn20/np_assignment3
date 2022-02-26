@@ -10,27 +10,62 @@
 #include <sys/types.h>
 #include <sys/time.h>
 #include <regex.h>
+#include "calcLib.h"
 
 // comment the DEBUG macro to turn off comments in the console
 #define DEBUG
 #define BACKLOG 5
-#define USER_LIMIT 50
-#define BUFFER_SIZE 500
+#define USER_LIMIT 150
+#define MAXDATASIZE 1500
 #define NICKNAME "NICK"
 #define MSG "MSG"
 
 using namespace std;
 
-struct chatUser
-{
-    char nickname[20];
+struct chatUser {
+    char nickname[12];
     int socket;
 };
 
-bool canAcceptName(char *nickname, chatUser users[USER_LIMIT]);
+char* parseMessage(char* text, char* nickname){    
+    char* reply = (char*) malloc(strlen(text) + sizeof nickname + 5);
+    sprintf(reply, "MSG %s %s\r", nickname, text);
+    return reply;
+}
 
-int main(int argc, char *argv[])
-{
+// helper function that tests nicknames
+bool canAcceptName(char *nickname, chatUser users[USER_LIMIT]) {
+    cout << "Testing nickname: " << nickname << endl;
+    if (strlen(nickname) > 12)
+        return false;
+
+    // check if there's user with same nickname
+    for (int i = 0; i < USER_LIMIT; i++)
+        if (strcmp(nickname, users[i].nickname) == 0)
+            return false;
+
+    char expression[] = "^[A-Za-z_]+$";
+    regex_t regularexpression;
+    int reti;
+
+    reti = regcomp(&regularexpression, expression, REG_EXTENDED);
+    if (reti) {
+        fprintf(stderr, "Could not compile regex.\n");
+        exit(1);
+    }
+
+    int matches;
+    regmatch_t items;
+
+    reti = regexec(&regularexpression, nickname, matches, &items, 0);
+
+    if (!reti)
+        return true;
+    else
+        return false;
+}
+
+int main(int argc, char *argv[]) {
     // disables debugging when there's no DEBUG macro defined
 #ifndef DEBUG
     cout.setstate(ios_base::failbit);
@@ -40,9 +75,8 @@ int main(int argc, char *argv[])
     /*************************************/
     /*  getting ip and port from args   */
     /***********************************/
-    if (argc != 2)
-    {
-        cerr << "usage: server <ip>:<port>\n"
+    if (argc != 2) {
+        cerr << "usage: cserverd <ip>:<port>\n"
              << "program terminated due to wrong usage" << endl;
 
         exit(-1);
@@ -51,7 +85,6 @@ int main(int argc, char *argv[])
     char seperator[] = ":";
     string serverIp = strtok(argv[1], seperator);
     string destPort = strtok(NULL, seperator);
-
     int serverPort = atoi(destPort.c_str());
 
     int serverSocket = -1,
@@ -59,6 +92,7 @@ int main(int argc, char *argv[])
         maxSocket = -1,
         interrupt = -1,
         bytes = -1,
+        sendSocket = 0,
         acceptMultipleClients = 1;
 
     /*************************************/
@@ -72,70 +106,33 @@ int main(int argc, char *argv[])
     fd_set socketSet;           // stores multiple sockets
     chatUser users[USER_LIMIT]; //users who wants to chat
 
-    char nickname[20];
-    char text[256];
-    char buffer[BUFFER_SIZE];
-    char reply[BUFFER_SIZE];
-    string connectProtocol = "HELLO 1\n";
-    string response("");
+    char *readBuffer = (char *)malloc(MAXDATASIZE);
+    char *writeBuffer = (char *)malloc(MAXDATASIZE);
 
     // initialise users
-    for (int i = 0; i < USER_LIMIT; i++)
-    {
+    for (int i = 0; i < USER_LIMIT; i++) {
         users[i].socket = 0;
         users[i].nickname[0] = 0;
     }
 
-    /*************************************/
-    /*   creating socket connection     */
-    /***********************************/
-    if ((serverSocket = socket(AF_INET, SOCK_STREAM, 0)) == -1)
-    {
-        cerr << "server: failed to create socket\n"
-             << "program terminated while socket()" << endl;
+    /****************************/
+    /*   setting up socket     */
+    /**************************/
+    verify(serverSocket = socket(AF_INET, SOCK_STREAM, 0));
 
-        exit(-1);
-    }
+    verify(setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, &acceptMultipleClients,
+                   sizeof(int)));
 
-    /*************************************/
-    /*     accept multiple clients      */
-    /***********************************/
-    if (setsockopt(serverSocket, SOL_SOCKET, SO_REUSEADDR, &acceptMultipleClients,
-                   sizeof(int)) < 0)
-    {
-        cerr << "server: failed to accept multiple connections\n"
-             << "program terminated while setsockopt()" << endl;
-        close(serverSocket);
-        exit(-1);
-    }
+    /* bind the socket with the server address and port */
+    verify(bind(serverSocket, (struct sockaddr *)&address, sizeof(address)));
 
-    /*************************************/
-    /*  binding server to ip and port   */
-    /***********************************/
-    if (bind(serverSocket, (struct sockaddr *)&address, sizeof(address)) < 0)
-    {
-        close(serverSocket);
-        cerr << "error: failed to bind socket\n"
-             << "program terminated while bind()" << endl;
-
-        exit(-1);
-    }
-
-    /*************************************/
-    /*  listening for incoming clients  */
-    /***********************************/
-    if (listen(serverSocket, BACKLOG) < 0)
-    {
-        cerr << "error: failed to listen to socket\n"
-             << "program terminated while listen()" << endl;
-        exit(-1);
-    }
+    /* listen for connection from client */
+    verify(listen(serverSocket, BACKLOG));
 
     printf("server started listening on %s:%d\n", serverIp.c_str(), serverPort);
     int addrLen = sizeof(address);
 
-    while (1)
-    {
+    while (1) {
         /**********************************************/
         /*   setup to monitor all the active client  */
         /********************************************/
@@ -144,8 +141,7 @@ int main(int argc, char *argv[])
         FD_SET(serverSocket, &socketSet);
         maxSocket = serverSocket;
 
-        for (int i = 0; i < USER_LIMIT; i++)
-        {
+        for (int i = 0; i < USER_LIMIT; i++) {
             clientSocket = users[i].socket;
 
             if (clientSocket > 0)
@@ -164,11 +160,9 @@ int main(int argc, char *argv[])
             cerr << "error: failed to listen interrupts" << endl;
 
         // new client connected
-        if (FD_ISSET(serverSocket, &socketSet))
-        {
+        if (FD_ISSET(serverSocket, &socketSet)) {
             if ((clientSocket = accept(serverSocket,
-                                       (struct sockaddr *)&address, (socklen_t *)&addrLen)) < 0)
-            {
+                                       (struct sockaddr *)&address, (socklen_t *)&addrLen)) < 0) {
                 cerr << "error: can't accept client\n"
                      << "program terminated while accept()" << endl;
                 close(serverSocket);
@@ -180,37 +174,27 @@ int main(int argc, char *argv[])
             /*************************************/
             /*  connect() protocol -> HELLO 1   */
             /***********************************/
-            if (send(clientSocket, connectProtocol.c_str(), strlen(connectProtocol.c_str()), 0) < 0)
-            {
-                cerr << "error: failed to send text to client\n"
-                     << "program terminated while send()" << endl;
-                close(clientSocket);
-                exit(-1);
-            }
+            writeBuffer = strdup("HELLO 1\n");
+            verify(send(clientSocket, writeBuffer, strlen(writeBuffer), 0));
 
             printf("server protocol: HELLO 1\n");
 
             //add new socket to array of sockets
-            for (int i = 0; i < USER_LIMIT; i++)
-            {
-                if (users[i].socket == 0)
-                {
+            for (int i = 0; i < USER_LIMIT; i++) {
+                if (users[i].socket == 0) {
                     users[i].socket = clientSocket;
-                    cout << "Adding client to list at " << i + 1 << endl;
+                    cout << "adding client to list at " << i + 1 << endl;
                     break;
                 }
             }
         }
 
-        for (int i = 0; i < USER_LIMIT; i++)
-        {
+        for (int i = 0; i < USER_LIMIT; i++) {
             clientSocket = users[i].socket;
 
-            if (FD_ISSET(clientSocket, &socketSet))
-            {
-
-                if ((bytes = read(clientSocket, buffer, sizeof buffer)) == 0)
-                {
+            if (FD_ISSET(clientSocket, &socketSet)) {
+                // when user exits chat - remove him
+                if ((bytes = read(clientSocket, readBuffer, MAXDATASIZE)) == 0) {
                     getpeername(clientSocket, (struct sockaddr *)&address,
                                 (socklen_t *)&addrLen);
 
@@ -223,24 +207,22 @@ int main(int argc, char *argv[])
                     memset(users[i].nickname, 0, sizeof users[i].nickname);
                 }
 
-                else
-                {
-                    buffer[bytes] = '\0';
-                    char command[10];
-                    sscanf(buffer, "%s %s", command, text);
+                else {
+                    readBuffer[bytes] = '\0';
+                    char *command, *text, *sp;
+                    sp = strchr(readBuffer, ' ');
+                    command = strndup(readBuffer, sp-readBuffer); /* Copy chars until space */
+                    text = sp+1; /* Skip the space */
 
                     /**************************************/
                     /*  NICK <nick> protocol -> OK/ERR   */
                     /************************************/
-
-                    if (strcmp(command, NICKNAME) == 0)
-                    {
+                    if (strcmp(command, NICKNAME) == 0) {
                         bool accept = canAcceptName(text, users);
 
-                        if (!accept)
-                        {
-                            response = "ERR invalid nickname\n";
-                            send(clientSocket, response.c_str(), strlen(response.c_str()), 0);
+                        if (!accept) {
+                            writeBuffer = strdup("ERR invalid_nickname\n");
+                            verify(send(clientSocket, writeBuffer, strlen(writeBuffer), 0));
                             printf("Nickname %s is invalid\n", text);
                             close(clientSocket);
                             users[i].socket = 0;
@@ -248,8 +230,8 @@ int main(int argc, char *argv[])
                         }
 
                         strcpy(users[i].nickname, text);
-                        response = "OK\n";
-                        send(clientSocket, response.c_str(), strlen(response.c_str()), 0);
+                        writeBuffer = strdup("OK\n");
+                        send(clientSocket, writeBuffer, strlen(writeBuffer), 0);
                         printf("Nickname %s is accepted\n", text);
                     }
 
@@ -257,42 +239,37 @@ int main(int argc, char *argv[])
                     /*  MSG <text> protocol ->           */
                     /*    MSG nick <text>/ERROR <text>  */
                     /***********************************/
-
                     else if (strcmp(command, MSG) == 0)
                     {
-                        if (users[i].nickname[0] == 0)
-                        {
-                            response = "ERR nickname not set\n";
-                            send(clientSocket, response.c_str(), strlen(response.c_str()), 0);
-                            cerr << "nickname not set" << endl;
+                        if (users[i].nickname[0] == 0) {
+                            writeBuffer = strdup("ERR no_nickname_set\n");
+                            send(clientSocket, writeBuffer, strlen(writeBuffer), 0);
+                            cerr << "no_nickname_set" << endl;
                             continue;
                         }
 
-                        int sendSocket = 0;
-                        response = buffer;
-                        strcpy(buffer, response.substr(3).c_str());
-                        sprintf(reply, "%s:%s\r", users[i].nickname, buffer);
+                        if(strlen(text) > 255){
+                            writeBuffer = strdup("ERR msg_overflow\n");
+                            send(clientSocket, writeBuffer, strlen(writeBuffer), 0);
+                            continue;
+                        }
 
-                        for (int j = 0; j < USER_LIMIT; j++)
-                        {
+                        writeBuffer = parseMessage(text, users[i].nickname);
+
+                        for (int j = 0; j < USER_LIMIT; j++) {
                             if (users[j].socket == 0)
                                 continue;
 
                             sendSocket = users[j].socket;
-                            if (clientSocket == sendSocket)
-                                continue;
-
-                            cout << "broadcasting: " << reply;
-
-                            send(sendSocket, reply, strlen(reply), 0);
+                            cout << "broadcasting: " << writeBuffer;
+                            send(sendSocket, writeBuffer, strlen(writeBuffer), 0);
                         }
                     }
 
                     // wrong command
-                    else
-                    {
-                        response = "ERR invalid command\n";
-                        send(clientSocket, response.c_str(), strlen(response.c_str()), 0);
+                    else {
+                        writeBuffer = strdup("ERR invalid command\n");
+                        send(clientSocket, writeBuffer, strlen(writeBuffer), 0);
                         printf("wrong command\n");
                     }
                 }
@@ -300,39 +277,9 @@ int main(int argc, char *argv[])
         }
     }
 
+    free(writeBuffer);
+    free(readBuffer);
+    close(serverSocket);
+
     return 0;
-}
-
-// helper function that tests nicknames
-bool canAcceptName(char *nickname, chatUser users[USER_LIMIT])
-{
-    cout << "Testing nickname: " << nickname << endl;
-    if (strlen(nickname) > 12)
-        return false;
-
-    // check if there's user with same nickname
-    for (int i = 0; i < USER_LIMIT; i++)
-        if (strcmp(nickname, users[i].nickname) == 0)
-            return false;
-
-    string expression = "^[A-Za-z_]+$";
-    regex_t regularexpression;
-    int reti;
-
-    reti = regcomp(&regularexpression, expression.c_str(), REG_EXTENDED);
-    if (reti)
-    {
-        fprintf(stderr, "Could not compile regex.\n");
-        exit(1);
-    }
-
-    int matches;
-    regmatch_t items;
-
-    reti = regexec(&regularexpression, nickname, matches, &items, 0);
-
-    if (!reti)
-        return true;
-    else
-        return false;
 }

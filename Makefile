@@ -31,4 +31,4 @@ libcalc: calcLib.o
 	ar -rc libcalc.a -o calcLib.o
 
 clean:
-	rm *.o *.a test server client
+	rm *.o *.a test cchat cserverd

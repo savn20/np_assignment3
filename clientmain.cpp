@@ -21,8 +21,41 @@
 
 using namespace std;
 
-void sendMessage(int socketConnection, char *message, int n);
-int getResponse(int socketConnection, char *message, int n);
+void sendMessage(int socketConnection, char *message, int n) {
+    if (send(socketConnection, message, n, 0) < 0) {
+        cerr << "error: failed to send message\n"
+             << "program terminated while send()" << endl;
+        close(socketConnection);
+        exit(-1);
+    }
+}
+
+int getResponse(int socketConnection, char *response, int n) {
+    int r = recv(socketConnection, response, n, 0);
+
+    if (r <= 0) {
+        cerr << "error: no byteSize rec from server\n"
+             << "program terminated while recv()" << endl;
+        close(socketConnection);
+        exit(-1);
+    }
+
+    return r;
+}
+
+// char* parseMessage(char* buffer){    
+//     // MSG nick text
+//     char *nickname, *text, *sp;
+//     sp = strchr(buffer, ' ');
+//     nickname = strndup(buffer, sp-buffer); /* Copy chars until space */
+//     text = sp+1; /* Skip the space */
+//     nickname = strndup(text, sp-text); /* Copy chars until space */
+//     text = sp+1; /* Skip the space */
+
+//     char* reply = (char*) malloc(strlen(text) + sizeof nickname);
+//     sprintf(reply, "%s:%s\r", nickname, text);
+//     return reply;
+// }
 
 int main(int argc, char *argv[]) {
     // disables debugging when there's no DEBUG macro defined
@@ -34,9 +67,8 @@ int main(int argc, char *argv[]) {
     /*************************************/
     /*  getting ip and port from args   */
     /***********************************/
-    if (argc != 3)
-    {
-        cerr << "usage: server <ip>:<port> <nickname>\n"
+    if (argc != 3) {
+        cerr << "usage: cchat <ip>:<port> <nickname>\n"
              << "program terminated due to wrong usage" << endl;
 
         exit(-1);
@@ -61,7 +93,6 @@ int main(int argc, char *argv[]) {
     char response[BUFFER_SIZE];
     char message[BUFFER_SIZE];
 	char s[INET6_ADDRSTRLEN];
-    char text[256];
 
     verify((rv = getaddrinfo(serverIp, serverPort, &hints, &servinfo)) != 0);
 
@@ -96,9 +127,8 @@ int main(int argc, char *argv[]) {
 
     printf("server protocol: %s\n", strtok(response, "\n"));
 
-    if (strcmp(strtok(response, "\n"), CONNECT) != 0)
-    {
-        cerr << "error: client didn't server protocol "
+    if (strcmp(strtok(response, "\n"), CONNECT) != 0) {
+        cerr << "error: client didn't support the server protocol "
              << strtok(response, "\n") << endl;
         close(sockFd);
         exit(-1);
@@ -116,8 +146,7 @@ int main(int argc, char *argv[]) {
 
     fd_set socketSet;
 
-    while (1)
-    {
+    while (1) {
         FD_ZERO(&socketSet);
         FD_SET(0, &socketSet);
         FD_SET(sockFd, &socketSet);
@@ -128,7 +157,8 @@ int main(int argc, char *argv[]) {
         if (FD_ISSET(sockFd, &socketSet)) {
             byteSize = getResponse(sockFd, response, sizeof(response));
             response[byteSize] = '\0';
-            printf("%s\n", strtok(response, "\n"));
+            /// TODO: parse the MSG nickname <text> to nickname:<text>
+            printf("%s", response);
             memset(response, 0, BUFFER_SIZE);
         }
 
@@ -144,30 +174,4 @@ int main(int argc, char *argv[]) {
             sendMessage(sockFd, message, strlen(message));
         }
     }
-}
-
-void sendMessage(int socketConnection, char *message, int n)
-{
-    if (send(socketConnection, message, n, 0) < 0)
-    {
-        cerr << "error: failed to send message\n"
-             << "program terminated while send()" << endl;
-        close(socketConnection);
-        exit(-1);
-    }
-}
-
-int getResponse(int socketConnection, char *response, int n)
-{
-    int r = recv(socketConnection, response, n, 0);
-
-    if (r <= 0)
-    {
-        cerr << "error: no byteSize rec from server\n"
-             << "program terminated while recv()" << endl;
-        close(socketConnection);
-        exit(-1);
-    }
-
-    return r;
 }
