@@ -16,22 +16,10 @@
 #define DEBUG
 #define BACKLOG 5
 #define USER_LIMIT 150
-#define MAXDATASIZE 1500
 #define NICKNAME "NICK"
 #define MSG "MSG"
 
 using namespace std;
-
-struct chatUser {
-    char nickname[12];
-    int socket;
-};
-
-char* parseMessage(char* text, char* nickname){    
-    char* reply = (char*) malloc(strlen(text) + sizeof nickname + 5);
-    sprintf(reply, "MSG %s %s\r", nickname, text);
-    return reply;
-}
 
 // helper function that tests nicknames
 bool canAcceptName(char *nickname, chatUser users[USER_LIMIT]) {
@@ -242,26 +230,26 @@ int main(int argc, char *argv[]) {
                     else if (strcmp(command, MSG) == 0)
                     {
                         if (users[i].nickname[0] == 0) {
-                            writeBuffer = strdup("ERR no_nickname_set\n");
+                            writeBuffer = strdup("ERROR no_nickname_set\n");
                             send(clientSocket, writeBuffer, strlen(writeBuffer), 0);
                             cerr << "no_nickname_set" << endl;
                             continue;
                         }
 
                         if(strlen(text) > 255){
-                            writeBuffer = strdup("ERR msg_overflow\n");
+                            writeBuffer = strdup("ERROR msg_overflow\n");
                             send(clientSocket, writeBuffer, strlen(writeBuffer), 0);
                             continue;
                         }
 
                         writeBuffer = parseMessage(text, users[i].nickname);
-
+                        cout << "broadcasting: " << writeBuffer;
+                        
                         for (int j = 0; j < USER_LIMIT; j++) {
                             if (users[j].socket == 0)
                                 continue;
 
                             sendSocket = users[j].socket;
-                            cout << "broadcasting: " << writeBuffer;
                             send(sendSocket, writeBuffer, strlen(writeBuffer), 0);
                         }
                     }

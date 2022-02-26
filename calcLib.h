@@ -21,9 +21,19 @@ Implementation in calcLib.c
 */
 
 #define SOCKET_FAILURE -1
+#define MAXDATASIZE 1500
+
+  struct chatUser {
+    char nickname[12];
+    int socket;
+  };
+
   void verify(int hasError);
   void *getSocketAddress(struct sockaddr *sa);
   char *getIpAddress(const struct sockaddr *sa, char *s, size_t maxlen);
+  char* parseMessage(char* text, char* nickname);
+  void parseServerResponse(char* command, char* text, char* userNickname);
+
 #endif
 
 #ifdef __cplusplus

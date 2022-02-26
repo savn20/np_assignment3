@@ -21,42 +21,6 @@
 
 using namespace std;
 
-void sendMessage(int socketConnection, char *message, int n) {
-    if (send(socketConnection, message, n, 0) < 0) {
-        cerr << "error: failed to send message\n"
-             << "program terminated while send()" << endl;
-        close(socketConnection);
-        exit(-1);
-    }
-}
-
-int getResponse(int socketConnection, char *response, int n) {
-    int r = recv(socketConnection, response, n, 0);
-
-    if (r <= 0) {
-        cerr << "error: no byteSize rec from server\n"
-             << "program terminated while recv()" << endl;
-        close(socketConnection);
-        exit(-1);
-    }
-
-    return r;
-}
-
-// char* parseMessage(char* buffer){    
-//     // MSG nick text
-//     char *nickname, *text, *sp;
-//     sp = strchr(buffer, ' ');
-//     nickname = strndup(buffer, sp-buffer); /* Copy chars until space */
-//     text = sp+1; /* Skip the space */
-//     nickname = strndup(text, sp-text); /* Copy chars until space */
-//     text = sp+1; /* Skip the space */
-
-//     char* reply = (char*) malloc(strlen(text) + sizeof nickname);
-//     sprintf(reply, "%s:%s\r", nickname, text);
-//     return reply;
-// }
-
 int main(int argc, char *argv[]) {
     // disables debugging when there's no DEBUG macro defined
 #ifndef DEBUG
@@ -90,8 +54,8 @@ int main(int argc, char *argv[]) {
     hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
 
-    char response[BUFFER_SIZE];
-    char message[BUFFER_SIZE];
+    char *readBuffer = (char *)malloc(MAXDATASIZE);
+    char *writeBuffer = (char *)malloc(MAXDATASIZE);
 	char s[INET6_ADDRSTRLEN];
 
     verify((rv = getaddrinfo(serverIp, serverPort, &hints, &servinfo)) != 0);
@@ -123,26 +87,37 @@ int main(int argc, char *argv[]) {
     /*************************************/
     /*  connect() -> HELLO 1 (response) */
     /***********************************/
-    getResponse(sockFd, response, sizeof(response));
+    verify(byteSize = recv(sockFd, readBuffer, MAXDATASIZE-1, 0));
+    readBuffer[byteSize] = '\0';
 
-    printf("server protocol: %s\n", strtok(response, "\n"));
+    printf("server protocol: %s\n", strtok(readBuffer, "\n"));
 
-    if (strcmp(strtok(response, "\n"), CONNECT) != 0) {
+    if (strcmp(strtok(readBuffer, "\n"), CONNECT) != 0) {
         cerr << "error: client didn't support the server protocol "
-             << strtok(response, "\n") << endl;
+             << strtok(readBuffer, "\n") << endl;
         close(sockFd);
         exit(-1);
     }
 
-    cout << "protocol supported sending nickname:" << nickname << endl;
+    cout << "server protocol supported, now sending nickname:" << nickname << endl;
 
     /**************************************/
     /*  NICK <nick> protocol -> OK/ERR   */
     /************************************/
-    sprintf(message, "NICK %s", nickname);
-    sendMessage(sockFd, message, strlen(message));
+    sprintf(writeBuffer, "NICK %s", nickname);
+    verify(send(sockFd, writeBuffer, strlen(writeBuffer), 0));
 
-    getResponse(sockFd, response, sizeof(response));
+    verify(byteSize = recv(sockFd, readBuffer, MAXDATASIZE-1, 0));
+    readBuffer[byteSize] = '\0';
+
+    if (strcmp(strtok(readBuffer, "\n"), OK) != 0) {
+        cerr << "error: nickname not supported "
+             << strtok(readBuffer, "\n") << endl;
+        close(sockFd);
+        exit(-1);
+    }
+
+    printf("nickname %s accepted\n", nickname);
 
     fd_set socketSet;
 
@@ -155,11 +130,16 @@ int main(int argc, char *argv[]) {
 
         // socket response
         if (FD_ISSET(sockFd, &socketSet)) {
-            byteSize = getResponse(sockFd, response, sizeof(response));
-            response[byteSize] = '\0';
+            verify(byteSize = recv(sockFd, readBuffer, MAXDATASIZE-1, 0));
+            readBuffer[byteSize] = '\0';
+            
+            char *command, *text, *sp;
+            sp = strchr(readBuffer, ' ');
+            command = strndup(readBuffer, sp-readBuffer); /* Copy chars until space */
+            text = sp+1; /* Skip the space */
+
             /// TODO: parse the MSG nickname <text> to nickname:<text>
-            printf("%s", response);
-            memset(response, 0, BUFFER_SIZE);
+            parseServerResponse(command, text, nickname);
         }
 
         /**************************************/
@@ -167,11 +147,16 @@ int main(int argc, char *argv[]) {
         /*    MSG nick <text>/ERROR <text>  */
         /***********************************/
         if (FD_ISSET(0, &socketSet)) {
-            fgets(message, 255, stdin);
-            string inp = strdup(message);
+            fgets(writeBuffer, 255, stdin);
+            string inp = strdup(writeBuffer);
             inp.insert(0, "MSG ");
-            strcpy(message, inp.c_str());
-            sendMessage(sockFd, message, strlen(message));
+            strcpy(writeBuffer, inp.c_str());
+            verify(send(sockFd, writeBuffer, strlen(writeBuffer), 0));
         }
     }
+
+    close(sockFd);
+    free(writeBuffer);
+    free(readBuffer);
+    return 0; 
 }

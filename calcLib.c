@@ -45,3 +45,26 @@ char *getIpAddress(const struct sockaddr *sa, char *s, size_t maxlen) {
 
   return s;
 }
+
+char* parseMessage(char* text, char* nickname){    
+    char* reply = (char*) malloc(strlen(text) + sizeof nickname + 5);
+    sprintf(reply, "MSG %s %s\r", nickname, text);
+    return reply;
+}
+
+void parseServerResponse(char* command, char* text, char* userNickname){
+  if (strcmp(command, "ERROR") == 0){
+    printf("%s %s\n", command, text);
+  }
+
+  if(strcmp(command, "MSG") == 0){
+    char *nickname, *message, *sp;
+    sp = strchr(text, ' ');
+    nickname = strndup(text, sp-text);
+    message = sp+1;
+
+    if(strcmp(nickname, userNickname) != 0){
+      printf("%s: %s", nickname, message);   
+    }  
+  }
+}
